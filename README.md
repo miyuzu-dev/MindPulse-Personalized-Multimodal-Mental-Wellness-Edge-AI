@@ -1,6 +1,8 @@
 # MindPulse
 **Personalized Multimodal Mental Wellness Edge AI**
 
+[Overview](#lý-do-chọn-đề-tài-và-mục-tiêu) · [Workflow](#workflow) · [DSP](#voice--ppg-dsp) · [AI](#ai-architecture) 
+
 MindPulse là dự án nghiên cứu hệ thống Edge AI kết hợp **giọng nói (Voice) và PPG** để học trạng thái nền của từng người và phát hiện những thay đổi đáng chú ý theo thời gian. Bài toán trung tâm là **Personalized Multimodal Anomaly Detection**: trạng thái hiện tại khác baseline của chính người dùng đến mức nào?
 
 **Trạng thái:** thiết kế và lộ trình nghiên cứu. Các kiến trúc, cấu hình và công nghệ dưới đây là định hướng triển khai; chưa phải tuyên bố về tính năng đã hoàn thành hoặc hiệu năng đã được kiểm chứng.
@@ -77,6 +79,23 @@ flowchart TD
 
 ## Voice / PPG DSP
 
+```mermaid
+flowchart LR
+    subgraph VOICE["Voice DSP"]
+        V1["PCM audio"] --> V2["DC removal + VAD"]
+        V2 --> V3["Framing + windowing"]
+        V3 --> V4["STFT + Mel filterbank"]
+        V4 --> V5["Log-Mel spectrogram"]
+    end
+    subgraph PPG["PPG DSP"]
+        P1["Raw PPG"] --> P2["DC removal + band-pass"]
+        P2 --> P3["Artifact / quality check"]
+        P3 --> P4["Peak detection"]
+        P4 --> P5["IBI + HR + PRV"]
+        P3 --> P6["Filtered PPG sequence"]
+    end
+```
+
 | Nhánh | Pipeline dự kiến | Biểu diễn và đặc trưng |
 |---|---|---|
 | **Voice** | PCM mono 16 kHz; loại DC, VAD, chia frame 25 ms / hop 10 ms, windowing, STFT, Mel filterbank, log | Log-Mel cho CNN; MFCC, pitch, energy, pause duration cho benchmark |
@@ -86,21 +105,40 @@ Ghép hai modality theo cùng khoảng thời gian quan sát; cửa sổ tính P
 
 Với thời điểm đỉnh pulse $t_i$ tính bằng giây, đặt $b_i$ là IBI; HR tương ứng có đơn vị nhịp/phút:
 
-$$
-b_i = t_{i+1}-t_i,\qquad \mathrm{HR}_i=\frac{60}{b_i}.
-$$
+$$b_i = t_{i+1}-t_i$$
+
+$$\mathrm{HR}_i=\frac{60}{b_i}.$$
 
 Với $N$ khoảng pulse hợp lệ và $\bar b$ là trung bình của chúng:
 
-$$
-\mathrm{RMSSD}=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N-1}(b_{i+1}-b_i)^2},
-\qquad
-\mathrm{SDNN}_{\mathrm{PPG}}=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(b_i-\bar b)^2}.
-$$
+$$\mathrm{RMSSD}=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N-1}(b_{i+1}-b_i)^2}$$
+
+$$\mathrm{SDNN}_{\mathrm{PPG}}=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(b_i-\bar b)^2}.$$
 
 RMSSD và SDNN ở đây tính bằng giây; nhân 1000 khi báo cáo bằng ms. Đây là các chỉ số **PRV từ PPG**, không mặc nhiên tương đương HRV từ ECG; ký hiệu SDNN được dùng theo cách tính tương tự trên các khoảng pulse đã kiểm tra chất lượng.
 
 ## AI architecture
+
+```mermaid
+flowchart TD
+    V["Log-Mel spectrogram"] --> VC["2D CNN + pooling"]
+    VC --> VE["Voice embedding: 64"]
+    P["Filtered PPG sequence"] --> PC["1D CNN + pooling"]
+    PC --> PE["PPG embedding: 32"]
+    VE --> F["Concatenation: 96"]
+    PE --> F
+    F --> X["Normalize: x"]
+    X --> ENC["AE encoder: 96 - 48 - 16"]
+    ENC --> LAT["Latent: 16"]
+    LAT --> DEC["AE decoder: 16 - 48 - 96"]
+    DEC --> XR["Reconstruction: x_hat"]
+    X --> ERR["Mean squared reconstruction error"]
+    XR --> ERR
+    ERR --> TH["Compare with personal threshold"]
+    TH --> OUT["Deviation + context review"]
+    classDef core fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    class F,ENC,LAT,DEC,ERR core
+```
 
 Cấu hình khởi đầu dưới đây là đề xuất để thử nghiệm, chưa phải cấu hình tối ưu trên ESP32-S3.
 
@@ -113,47 +151,51 @@ Cấu hình khởi đầu dưới đây là đề xuất để thử nghiệm, c
 
 Với $u$ là người dùng, $t$ là cửa sổ đo, $X^{(v)}_{u,t}$ là Log-Mel và $X^{(p)}_{u,t}$ là chuỗi PPG:
 
-$$
-\mathbf{h}^{(v)}_{u,t}=f_v(X^{(v)}_{u,t}),\qquad
-\mathbf{h}^{(p)}_{u,t}=f_p(X^{(p)}_{u,t}),\qquad
-\mathbf{h}_{u,t}=\operatorname{concat}\left(\mathbf{h}^{(v)}_{u,t},\mathbf{h}^{(p)}_{u,t}\right).
-$$
+$$\mathbf{h}_{u,t}^{(v)}=f_v(X^{(v)}_{u,t})$$
+
+$$\mathbf{h}^{(p)}_{u,t}=f_p(X^{(p)}_{u,t})$$
+
+$$\mathbf{h}_{u,t}=\mathrm{concat}\left(\mathbf{h}^{(v)}_{u,t},\mathbf{h}^{(p)}_{u,t}\right).$$
 
 Gọi $\mathbf{x}_{u,t}$ là embedding sau chuẩn hóa, $d=96$ và $\hat{\mathbf{x}}_{u,t}=g_\phi(f_\theta(\mathbf{x}_{u,t}))$ là đầu ra Autoencoder:
 
-$$
-E_{u,t}=\frac{1}{d}\left\|\mathbf{x}_{u,t}-\hat{\mathbf{x}}_{u,t}\right\|_2^2,\qquad
-\mathcal{L}_{\mathrm{AE}}=\frac{1}{M}\sum_{(u,t)\in\mathcal{B}_{\mathrm{train}}}E_{u,t}.
-$$
+$$E_{u,t}=\frac{1}{d}\left\lVert\mathbf{x}_{u,t}-\hat{\mathbf{x}}_{u,t}\right\rVert_2^2$$
+
+$$\mathcal{L}_{\mathrm{AE}}=\frac{1}{M}\sum_{(u,t)\in\mathcal{B}_{\mathrm{train}}}E_{u,t}.$$
 
 $\mathcal{B}_{\mathrm{train}}$ gồm $M$ cửa sổ baseline dành cho huấn luyện. Hai CNN cần được pretrain bằng mục tiêu representation learning có kiểm chứng rồi đóng băng khi train Autoencoder; không chỉ tối ưu reconstruction trên embedding với cả hai encoder tự do, vì có nguy cơ embedding suy biến. Dữ liệu và mục tiêu pretraining là hạng mục cần hoàn thiện trong roadmap.
 
 ## Personal Baseline và benchmark
 
+```mermaid
+flowchart LR
+    DATA["Personal reference sessions"] --> SPLIT["Split by session / time"]
+    SPLIT --> TRAIN["Train: scaler + model"]
+    SPLIT --> CAL["Held-out calibration"]
+    TRAIN --> CAL
+    CAL --> TAU["Personal threshold"]
+    NEW["New valid window"] --> SCORE["Frozen scaler + model"]
+    TRAIN --> SCORE
+    SCORE --> CHECK["Score vs threshold"]
+    TAU --> CHECK
+    CHECK --> CTX["Review context and persistence"]
+```
+
 Baseline là trạng thái tham chiếu cá nhân, **không phải nhãn “khỏe mạnh”**. Thu dữ liệu qua nhiều phiên và ngữ cảnh, giữ riêng tập train, tập calibration và tập test theo thời gian. Chỉ phát cảnh báo khi đủ dữ liệu tham chiếu và chất lượng đo; không dùng ngưỡng chung tùy ý cho mọi người.
 
 Với vector đặc trưng $\mathbf{x}_{u,t}$, mean $\boldsymbol{\mu}_u$ và độ lệch chuẩn $\sigma_{u,j}$ học từ baseline, Z-score của đặc trưng $j$ là:
 
-$$
-z_{u,t,j}=\frac{x_{u,t,j}-\mu_{u,j}}{\max(\sigma_{u,j},\epsilon)}.
-$$
+$$z_{u,t,j}=\frac{x_{u,t,j}-\mu_{u,j}}{\max(\sigma_{u,j},\epsilon)}.$$
 
 $\epsilon>0$ là sàn số học. Mahalanobis xét tương quan giữa các đặc trưng; dùng covariance regularization với $\lambda>0$ để hạn chế ma trận suy biến:
 
-$$
-D_{M,u}(\mathbf{x})=
-\sqrt{(\mathbf{x}-\boldsymbol{\mu}_u)^\top
-(\mathbf{\Sigma}_u+\lambda\mathbf{I})^{-1}
-(\mathbf{x}-\boldsymbol{\mu}_u)}.
-$$
+$$D_{M,u}(\mathbf{x})= \sqrt{(\mathbf{x}-\boldsymbol{\mu}_u)^\top (\mathbf{\Sigma}_u+\lambda\mathbf{I})^{-1} (\mathbf{x}-\boldsymbol{\mu}_u)}.$$
 
 Ngưỡng Autoencoder được hiệu chỉnh trên **baseline calibration giữ riêng** của người dùng:
 
-$$
-\tau_u=Q_{1-\alpha}\left(\{E_{u,t}:t\in\mathcal{B}_{u,\mathrm{cal}}\}\right),
-\qquad
-a_{u,t}=\mathbb{1}[E_{u,t}>\tau_u].
-$$
+$$\tau_u=Q_{1-\alpha}\left(\{E_{u,t}:t\in\mathcal{B}_{u,\mathrm{cal}}\}\right)$$
+
+$$E_{u,t}>\tau_u.$$
 
 $Q_{1-\alpha}$ là phân vị thực nghiệm; $\alpha$ là mức đuôi dùng khi calibration, không đảm bảo tỷ lệ cảnh báo sai ngoài thực tế. Vượt ngưỡng chỉ đánh dấu sai lệch để xem xét thêm chất lượng, độ kéo dài và ngữ cảnh; reconstruction error không phải xác suất mắc rối loạn tâm thần.
 
@@ -169,41 +211,64 @@ So sánh trên cùng phân chia dữ liệu và điều kiện calibration; báo
 
 ## Edge AI / TinyML
 
+```mermaid
+flowchart LR
+    TRAIN["PC: train FP32 model"] --> QUANT["Representative data + INT8"]
+    QUANT --> VERIFY["Validate operators and score changes"]
+    VERIFY --> DEPLOY["TFLite Micro on ESP32-S3"]
+    DEPLOY --> PROFILE["Measure RAM / flash / latency / energy"]
+    PROFILE --> CAL["Recalibrate personal threshold"]
+```
+
 Training và calibration thực hiện trên máy phát triển. Thiết bị hướng tới thu nhận tín hiệu, DSP và inference offline; backend quản lý lịch sử, phiên bản model và các chức năng hỗ trợ. Khả năng chạy toàn bộ CNN + Autoencoder trên ESP32-S3 phải được chứng minh bằng profiling; bắt đầu từ benchmark thống kê và mô hình nhỏ.
 
 INT8 quantization ánh xạ giá trị thực $r$ sang số nguyên $q$, với scale $s>0$ và zero-point $z_0$:
 
-$$
-q=\operatorname{clip}\left(\operatorname{round}(r/s)+z_0,-128,127\right),
-\qquad
-\hat r=s(q-z_0).
-$$
+$$q=\mathrm{clip}\left(\mathrm{round}(r/s)+z_0,-128,127\right)$$
+
+$$\hat r=s(q-z_0).$$
 
 Dùng dữ liệu đại diện để calibration, kiểm tra operator được runtime hỗ trợ, peak RAM/tensor arena, flash, latency và năng lượng. So sánh FP32 với INT8 và hiệu chỉnh lại ngưỡng bằng mô hình đã lượng tử hóa vì reconstruction error có thể thay đổi. Ưu tiên xử lý local; dữ liệu gửi đi phải tối thiểu và có sự đồng ý của người dùng.
 
 ## Closed-loop feedback
 
+```mermaid
+flowchart LR
+    D["Detect deviation"] --> C["Check context"]
+    C --> I["User chooses support"]
+    I --> M["Re-measure + self-report"]
+    M --> E["Evaluate before / after"]
+    E --> P["Update preferences"]
+    P --> C
+    E -. "Qualified data only" .-> B["Review baseline update"]
+    B --> D
+```
+
 Decision engine khởi đầu bằng luật dựa trên mức sai lệch, ngữ cảnh, sở thích và lịch sử. Người dùng có thể chọn hoặc bỏ qua gợi ý như nghỉ ngắn, thở thư giãn hay ghi chú cảm nhận. Sau đó hệ thống đo lại trong điều kiện tương đương và thu phản hồi chủ quan.
 
 Reward thử nghiệm dùng cùng model, baseline và thang điểm cố định trong cặp đo trước/sau:
 
-$$
-R_{u,t}=D_{u,\mathrm{before}}-D_{u,\mathrm{after}}.
-$$
+$$R_{u,t}=D_{u,\mathrm{before}}-D_{u,\mathrm{after}}.$$
 
 $D$ là điểm sai lệch trên thang cố định, có thể dùng trực tiếp reconstruction error $E$ cho prototype. Reward dương chỉ cho thấy điểm giảm, không chứng minh hiệu quả lâm sàng hay quan hệ nhân quả. Feedback giúp điều chỉnh xếp hạng gợi ý; cập nhật baseline cần dữ liệu đủ chất lượng, kiểm soát drift, lưu phiên bản và khả năng rollback, tránh tự hấp thụ mọi sai lệch kéo dài vào baseline.
 
 ## RAG / LLM — supporting layer
 
+```mermaid
+flowchart LR
+    DOC["Curated documents"] --> INDEX["Chunk + embed + index"]
+    Q["Question + permitted summary"] --> RET["Retrieve top-k"]
+    INDEX --> RET
+    RET --> CHECK["Check relevance"]
+    CHECK --> LLM["LLM with retrieved context"]
+    LLM --> ANSWER["Explanation + source references"]
+```
+
 RAG truy xuất tài liệu wellness đã tuyển chọn; LLM giải thích xu hướng và nội dung hỗ trợ kèm nguồn. Nhánh này chạy trên app/backend và không quyết định anomaly score, ngưỡng hoặc chẩn đoán.
 
 Với embedding truy vấn $\mathbf{e}_q$ và tài liệu $\mathbf{e}_d$ có norm khác 0:
 
-$$
-\operatorname{sim}(q,d)=
-\frac{\mathbf{e}_q^\top\mathbf{e}_d}
-{\|\mathbf{e}_q\|_2\|\mathbf{e}_d\|_2}.
-$$
+$$\mathrm{sim}(q,d)= \frac{\mathbf{e}_q^\top\mathbf{e}_d} {\lVert\mathbf{e}_q\rVert_2\,\lVert\mathbf{e}_d\rVert_2}.$$
 
 Truy xuất top-$k$, kiểm tra độ liên quan rồi đưa nguồn vào context. Khi thiếu bằng chứng, hệ thống cần nói rõ giới hạn; chỉ gửi tóm tắt được cho phép, không mặc định truyền raw voice hoặc toàn bộ lịch sử cá nhân.
 
@@ -225,4 +290,3 @@ Truy xuất top-$k$, kiểm tra độ liên quan rồi đưa nguồn vào contex
 Voice và PPG chịu ảnh hưởng của chuyển động, tiếp xúc sensor, tiếng ồn, đặc điểm người dùng và ngữ cảnh đo. Thiếu modality, ít dữ liệu baseline, domain shift hoặc baseline drift có thể làm điểm sai lệch không đáng tin cậy. Chưa có kết quả kiểm chứng để suy ra hiệu quả lâm sàng hay cam kết độ chính xác.
 
 MindPulse là dự án nghiên cứu kỹ thuật hỗ trợ **mental wellness**, không phải thiết bị chẩn đoán, công cụ theo dõi khẩn cấp hoặc phương án thay thế chuyên gia sức khỏe tâm thần. Thu thập dữ liệu cần minh bạch, có đồng ý, quyền xóa dữ liệu và kiểm soát truy cập.
-
