@@ -3,8 +3,6 @@
 
 MindPulse là dự án nghiên cứu hệ thống Edge AI kết hợp **giọng nói (Voice) và PPG** để học trạng thái nền của từng người và phát hiện những thay đổi đáng chú ý theo thời gian. Bài toán trung tâm là **Personalized Multimodal Anomaly Detection**: trạng thái hiện tại khác baseline của chính người dùng đến mức nào?
 
-> **Signal Change != Mental Disorder** · **Deviation != Diagnosis**
-
 **Trạng thái:** thiết kế và lộ trình nghiên cứu. Các kiến trúc, cấu hình và công nghệ dưới đây là định hướng triển khai; chưa phải tuyên bố về tính năng đã hoàn thành hoặc hiệu năng đã được kiểm chứng.
 
 ## Lý do chọn đề tài và mục tiêu
@@ -222,21 +220,9 @@ Truy xuất top-$k$, kiểm tra độ liên quan rồi đưa nguồn vào contex
 | **RAG** | FAISS hoặc Qdrant, embedding model và LLM được lựa chọn sau |
 | **Development** | PC/laptop phục vụ huấn luyện, kiểm thử và profiling |
 
-## Roadmap
-
-- [ ] **1. Acquisition & DSP:** tích hợp sensor, timestamp, kiểm tra chất lượng và quy trình thu dữ liệu có đồng ý.
-- [ ] **2. Baseline & benchmarks:** xây dựng dataset, chia train/calibration/test; triển khai Z-score, Mahalanobis, Isolation Forest và One-Class SVM.
-- [ ] **3. Multimodal AI:** xác định pretraining CNN, huấn luyện fusion + Autoencoder; đánh giá ablation và leakage.
-- [ ] **4. Edge deployment:** INT8, kiểm tra chuyển đổi/runtime, profiling ESP32-S3 và calibration lại ngưỡng.
-- [ ] **5. Closed loop:** dashboard, context engine, đo trước/sau, feedback và kiểm soát baseline drift.
-- [ ] **6. Supporting RAG:** tuyển chọn nguồn, giải thích có trích dẫn và đánh giá độ bám nguồn.
-
 ## Limitations / disclaimer
 
 Voice và PPG chịu ảnh hưởng của chuyển động, tiếp xúc sensor, tiếng ồn, đặc điểm người dùng và ngữ cảnh đo. Thiếu modality, ít dữ liệu baseline, domain shift hoặc baseline drift có thể làm điểm sai lệch không đáng tin cậy. Chưa có kết quả kiểm chứng để suy ra hiệu quả lâm sàng hay cam kết độ chính xác.
 
 MindPulse là dự án nghiên cứu kỹ thuật hỗ trợ **mental wellness**, không phải thiết bị chẩn đoán, công cụ theo dõi khẩn cấp hoặc phương án thay thế chuyên gia sức khỏe tâm thần. Thu thập dữ liệu cần minh bạch, có đồng ý, quyền xóa dữ liệu và kiểm soát truy cập.
-
-> **Signal Change != Mental Disorder**  
-> **Deviation != Diagnosis**
 
